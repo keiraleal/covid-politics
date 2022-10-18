@@ -1,0 +1,372 @@
+---
+title: "Covid Politics: A Statistical Analysis"
+author: "Keira Leal"
+date: "August 11, 2021"
+output: 
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    code_download: true
+---
+
+
+
+This project will attempt to find if there is a relationship between political beliefs and Covid-19 cases using a variety of methods. More specifically, the percentage of voters that voted for a particular candidate in the American 2020 Presidential Elections in each state versus the total amount of Covid-19 cases per 1 million residents in each state.
+
+Problem statement:
+**Is there a relationship between the percentage of voters that voted for a particular candidate in the 2020 Elections and the amount of Covid-19 cases per 1 million residents?**
+
+The first steps in this analysis are loading packages and loading data. The data has already been loaded. Below is the code for loading the packages. It includes `tidyverse` which contains an array of other packages, mostly used here for data wrangling (`dplyr`) and plotting (`ggplot2`). The code also loads `infer`, which is used for hypothesis testing. Lastly, the code loads `moderndive` for regression modeling.
+```{r, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(infer)
+library(moderndive)
+```
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+#Loading election data
+State <- c("Alabama", "Alaska", "Arizona", "Arkansas", "California", #1
+           "Colorado", "Connecticut", "Delaware", "Florida", "Georgia",
+           "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa",
+           "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", #4
+           "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri",
+           "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey",
+           "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", #7
+           "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina",
+           "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
+           "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming") #10
+PercentTrump <- c(62.2, 53.1, 49.1, 62.4, 34.3, #1
+                  41.9, 39.2, 39.8, 51.2, 49.3,
+                  34.3, 63.9, 40.6, 57.1, 53.2,
+                  56.2, 62.1, 58.5, 44, 32.4, #4
+                  32.3, 47.8, 45.4, 57.6, 56.8,
+                  56.9, 58.5, 47.7, 45.5, 41.4,
+                  43.5, 37.8, 50.1, 65.5, 53.3, #7
+                  65.4, 40.7, 48.8, 38.8, 55.1,
+                  61.8, 60.7, 52.1, 58.2, 30.8,
+                  44.2, 39, 68.6, 48.9, 70.4) #10
+PercentBiden <- c(36.7, 43, 49.4, 34.8, 63.5, #1
+                  55.4, 59.3, 58.8, 47.9, 49.5,
+                  63.7, 33.1, 57.5, 41, 45,
+                  41.6, 36.2, 39.9, 53.1, 65.8, #4
+                  65.9, 50.6, 52.6, 41.1, 41.4,
+                  40.6, 39.4, 50.1, 52.9, 57.3,
+                  54.3, 60.9, 48.7, 31.9, 45.3, #7
+                  32.3, 56.9, 50, 59.7, 43.4,
+                  35.6, 37.5, 46.5, 37.7, 66.4,
+                  54.4, 58.4, 29.7, 49.6, 26.7) #10
+PercentOther <- 100 - PercentBiden - PercentTrump
+DoesBidenWin <- PercentBiden > PercentTrump
+USA_Election2020_Data <- data.frame(State, PercentTrump, PercentBiden, PercentOther, DoesBidenWin)
+
+#Loading covid data
+library(readr)
+USA_Covid_Data <- read_csv("USACovidData.csv")
+```
+
+Two datasets will be used, `USA_Covid_Data` from Kaggle (retrieved August 3rd, 2021) (kagle.com/anandhuh/usa-statewise-latest-covid19-data), and `USA_Election2020_Data` from Politico (retrieved August 9th, 2021) (politico.com/2020-election/results/president/).
+
+The `USA_Covid_Data` dataset contains 10 variables including two variables of interest; `State` and `Total Cases/1 mil population`. The code below returns the first 10 observations of the two variables.
+
+```{r}
+USA_Covid_Data %>%
+  select(State, `Total Cases/1 mil population`) %>% #Selects the variables of interest
+  head(10) #Displays the first 10 observations
+```
+
+`State` is a list of the American states in alphabetical order. `Total Cases/1 mill population` is the total amount of Covid-19 cases (as of August 3rd, 2020) in each state per 1 million residents. Note that since there are spaces in the variable name, in the code above backquotes are used around the variable name.
+
+The `USA_Election2020_Data` dataset contains 5 variables including four variables of interest; `State`, `PercentTrump`, `PercentBiden`, and `DoesBidenWin`. The code below returns the first 10 observations of the four variables.
+
+```{r}
+USA_Election2020_Data %>%
+  select(-PercentOther) %>% #Selects the variables of interest
+  head(10) #Displays the first 10 observations
+```
+
+Note that `select()` here looks a little different than the previous time. Instead of writing all the variables wanted, the one variable that isn't wanted is removed with a `-`. `State` is a list of the states. `PercentTrump` is the percentage of voters in that state that voted for Trump in the 2020 elections. Similarly, `PercentBiden` is the percentage of voters in that state that voted for Biden. Lastly, `DoesBidenWin` is a true or false variable that states whether or not Biden won the popular vote in that state (in other words, is `PercentBiden` greater than `PercentTrump`?). `TRUE` values correspond with a popular vote win for Biden, and `FALSE` values correspond with a popular vote win for Trump. Note that this only works if no third party candidates won the popular vote in any state, which is true in this election.
+
+
+## Data Wrangling
+
+To be able to study these datasets together, it is useful to join the data frames. The following code does just that.
+
+```{r}
+usa_covid_election <- USA_Covid_Data %>% #Includes the name of the new frame
+  inner_join(USA_Election2020_Data, by = "State") #This is the function that joins
+
+usa_covid_election %>%
+  head(10) #Displays the first 10 rows of the joined data frame
+```
+
+Note that the new data frame only has one variable with the states. This is because of the `by =` parameter in the `inner_join()` function. It chooses which variable the two data frames have in common (in other words, which variable to overlap).
+
+The joined data frame still includes many extra variables that aren't useful in this particular analysis. Also, the `Total Cases/1 mil population` variable name is a bit long and includes spaces, so it should be renamed.
+
+```{r}
+tidy_covid_election <- usa_covid_election %>% #Defining the new frame & listing the source (old frame)
+  rename(CasesPerMill = `Total Cases/1 mil population`) %>% #Renaming
+  select(State, CasesPerMill, PercentTrump, PercentBiden, DoesBidenWin) #Selecting the wanted variables
+
+tidy_covid_election %>%
+  head(10) #Displays the first 10 rows of the clean (tidy) frame
+```
+
+Note that `CasesPerMill` was formerly named `Total Cases/1 mil population`.
+
+
+## Performing an Exploratory Data Analysis
+
+The next step is performing an exploratory data analysis. The purpose of exploratory data analysis is to provide the general idea of the data, which helps one determine with steps to take next. The first step of this analysis is previewing the data, which is done above. The next step is creating a few summary statistics and visualizations.
+
+First, the `summarize()` function is used in conjunction with other functions to calculate summary statistics for CasesPerMill.
+
+```{r}
+tidy_covid_election %>%
+  summarize(MeanCasesPerMill = mean(CasesPerMill), #Calculating the mean (average) for `CasesPerMill`
+            MedianCasesPerMill = median(CasesPerMill), #Calculating the median (middle value)
+            sdCasesPerMill = sd(CasesPerMill)) #Calculating the standard deviation (a measure of spread)
+```
+
+The standard deviation (third number) is quite large, indicating that the amount of cases per 1 million people differs significantly per state. Another thing to note is that the mean (first number) and the median (second number) are a different, indicating that `CasesPerMill` is likely skewed (which essentially means it has a longer 'tail' on one side). This skewed theory is proven correct by the histogram below, which takes each state and places it along the x axis where it corresponds to `CasesPerMill`, and draws taller bars for 'overlapping' states.
+
+```{r, echo = FALSE}
+ggplot(tidy_covid_election, aes(CasesPerMill)) +
+  geom_histogram(bins = 10, color = "white") +
+  theme_light() +
+  labs(title = "Histogram of 'CasesPerMill'")
+```
+
+Summary statistics that are grouped by other variable can also be calculated, such a the table below and its code. This example is grouped by election winner per state.
+
+```{r}
+tidy_covid_election %>%
+  group_by(DoesBidenWin) %>% #Grouping by winner
+  summarize(MeanCasesPerMill = mean(CasesPerMill), #Calculating the mean
+            MedianCasesPerMill = median(CasesPerMill), #Calculating the median
+            sdCasesPerMill = sd(CasesPerMill)) #Calculating the standard deviation
+```
+
+The first number, 117597.64 is the mean cases per million residents for states where Trump won (`DoesBidenWin = FALSE`). The number below is the mean for states when Biden won (`DoesBidenWin = TRUE`). Similarly, for the median and sd (standard deviation) there are two numbers per column, each referring to either states that Trump won, or states that Biden won. The first column states which numbers refer to Biden winning (using `TRUE` or `FALSE`).
+
+To make a graphic of `CasesPerMill`, an overlapping histogram or faceted histogram could be made. As an alternative, as shown below, a side-by-side boxplot could be used. The thick black line is the median for that group. The middle 50% of the values for `CasesPerMill` per election results fit in the box. The whiskers are the highest and lowest values (except if the values are too far, then they are represented by a dot, as seen in the `CasesPerMill = FALSE` boxplot).
+
+```{r}
+ggplot(tidy_covid_election, aes(DoesBidenWin, CasesPerMill)) + #Setting the data and variables
+  geom_boxplot() + #Making the boxplot
+  theme_light() + #This is a plot theme that will be seen throughout the report
+  labs(x = "Did Biden Win The Popular Vote In This State?", #Creating labels
+       y = "Total Covid Cases Per 1 Million People",
+       title = "Election Results Versus Covid Cases by State")
+```
+
+From the plot above, it is seen that states in which Biden won the popular vote had more spread in terms of Covid-19 cases. It also looks like states in which Trump won generally had more Covid-19 cases.
+
+But the above plot only looks at who won, but not by how much. The following two plots (one for Biden, one for Trump) compare the percentage of votes for the candidate and the amount of Covid-19 cases per 1 million people. Each state represents a dot, and the black line is a trendline.
+
+```{r, message = FALSE}
+ggplot(tidy_covid_election, aes(PercentBiden, CasesPerMill)) + #Setting the data and variables
+  geom_point(color = "steelblue") + #Making the points (and setting their color)
+  geom_smooth(method = "lm", se = FALSE, color = "black") + #Creating the line
+  theme_light() + #Theme
+  labs(x = "Percent Of Voters Who Voted For Biden", #Labels
+       y = "Total Covid Cases Per 1 Million People",
+       title = "Percent of Biden Votes Versus Covid Cases")
+```
+
+Above, all 50 state are plotted, with the x-axis representing the percent of voters who voted for Biden in that state, and the y-axis representing the amount of Covid-19 cases per 1 million people. The correlation is negative; as the percent of votes for Biden increase, Covid-19 cases decrease.
+
+Similarly, in the graph below, the x-axis represents the percent of voters who voted for Trump in that state, and again the y-axis is the amount of Covid-19 cases per 1 million people. This correlation is positive; as the percent of votes for Trump increase, Covid-19 cases also increase. Note that the two graphs are almost mirrors of each other (they aren't perfect mirrors of each other because of third party votes).
+
+```{r, message = FALSE}
+ggplot(tidy_covid_election, aes(PercentTrump, CasesPerMill)) + #Setting data and variables
+  geom_point(color = "hotpink3") + #Making the points (and setting their color)
+  geom_smooth(method = "lm", se = FALSE, color = "black") + #Creating the line
+  theme_light() + #Theme
+  labs(x = "Percent Of Voters Who Voted For Trump", #Labels
+       y = "Total Covid Cases Per 1 Million People",
+       title = "Percent of Trump Votes Versus Covid Cases")
+```
+
+
+## Linear Regression Modeling
+
+### With one categorical and one numerical variable
+
+A useful tool in data analysis is regression modeling. The first way explored here is with one categorical variable and one numerical variable: `DoesBidenWin` and `CasesPerMill`. The `lm()` function can be used to create a linear model. In the code below, first a linear model is created, then a regression table is made.
+
+```{r}
+#Creating linear model `model_covid_election_Biden_Win`
+model_covid_election_Biden_Win <- lm(CasesPerMill ~ DoesBidenWin, data = tidy_covid_election)
+
+#Making the regression table
+get_regression_table(model_covid_election_Biden_Win)
+```
+
+This table may look daunting, but there is a perfect explanation. At the moment, the only columns of interests are `term` and `estimate`. (Think of it this way; `intercept` = 117597.64, and `DoesBidenWinTRUE` = -23037.08.) Now, `intercept` is the mean of Covid-19 cases per 1 million people in a state with a Trump popular vote win (117597.64) (`DoesBidenWin = FALSE`). `DoesBidenWinTRUE` is the offset of the mean of Covid-19 cases per 1 million people in a state with a Biden popular vote win (`DoesBidenWin = TRUE`). What does an offset mean? Surely there aren't -23037.08 cases of Covid-19. The offset is exactly what it sounds like. If the `intercept` is 117597.64 and the offset is -23037.08 cases, the mean of Covid-19 cases per 1 million people in a state were Biden won the popular vote is `intercept` + `DoesBidenWinTRUE`, or 117597.64 - 23037.08 = 94560.56. From all of this, an equation can be created:
+
+_CasesPerMill_hat = 117597.64 - 23037.08 * 1BidenWin(x)_
+
+What does this mean? *CasesPerMill_hat* is the fitted (or expected) value for `CasesPerMill` (in other words, given the other variable(s), what is `CasesPerMill` expected to be?). *117597.65* is the intercept of the equation. The offset is `DoesBidenWinTRUE` or *-23037.08*. Since `DoesBidenWinTRUE` is the offset, it is only used if Biden wins. Otherwise, it is not used. To facilitate that, `1BidenWin(x)` is used (multiplied by the offset). If `BidenWin` is in `x` (if `DoesBidenWin = TRUE`) it returns a 1 (which is multiplied by the offset), otherwise, it returns a 0 (and therefore ignoring the offset).
+
+To put this in practice, imagine that one is trying to find the expected value for `CasesPerMill` for a state where Trump won the popular vote. The equation would be:
+
+_CasesPerMill_hat = 117597.64 - 23037.08 * 1BidenWin(x)_
+                 _= 117597.64 - 23037.08 * 0_
+                 _= 117597.64 + 0_
+                 _= 117597.64_
+
+This means that the expected amount of Covid-19 cases per 1 million people for a state where Trump won the popular vote is *117597.64*, as calculated earlier. Now, imagine the one is trying to find the opposite, the expected value for `CasesPerMill` for a state where Biden won the popular vote. The equation would be:
+
+_CasesPerMill_hat = 117597.64 - 23037.08 * 1BidenWin(x)_
+                 _= 117597.64 - 23037.08 * 1_
+                 _= 117597.64 - 23037.08_
+                 _= 94560.56_
+
+This means that the expected amount of Covid-19 cases per 1 million people for a state where Biden won the popular vote is *94560.56*.
+
+### With two numerical variables
+
+What if one wanted to see the expected Covid-19 cases a bit more exact? Another way of linear regression modeling is with two numerical variables: In this case `PercentBiden` and `CasesPerMill`. This way, one could find the expected Covid-19 cases for each state individually, for the amount of voters who voted for Biden. The code below creates a new linear regression model:
+
+```{r}
+model_covid_election_Biden_Percent <- lm(CasesPerMill ~ PercentBiden, data = tidy_covid_election)
+```
+
+The following code will create regression points from the regression model:
+
+```{r}
+#Creating regression points
+points_covid_election_Biden_Percent <- get_regression_points(model_covid_election_Biden_Percent)
+
+#Showing the first 10 rows of the new data frame
+points_covid_election_Biden_Percent %>%
+  head(10)
+```
+
+Before continuing, note that 100 - `PercentBiden` is not necessary equal to `PercentTrump`. There could also be votes for third party candidates. Since this is not accounting for that, the results will not be perfect as it is unknown (in this model) how much of the other percent left (after `PercentBiden`) go to Trump or to other candidates.
+
+Continuing, the table contains the regression points, one for each state (identified by the `ID` column). `CasesPerMill` are the observed (or actual) values for `CasesPerMill` (outcome variable y). `PercentBiden` are the observed values of `PercentBiden` (explanatory variable x). `CasesPerMill_hat` are the fitted (or expected) values for `CasesPerMill` using a regression model that takes `PercentBiden` into account. Lastly, `residual` are the differences between `CasesPerMill_hat` and `CasesPerMill` (in other words, how off the expected value was).
+
+Just as was done with the previous regression model, a regression table can be created:
+
+```{r}
+get_regression_table(model_covid_election_Biden_Percent)
+```
+
+Just like before, the only columns of interest are `term` and `estimate`. `intercept` (166463.402) is the expected amount of cases for a theoretical state where 0 percent of voters voted for Biden. `PercentBiden` (-1261.686) is the slope (in other words, how many more Covid-19 cases per million people in a state are expected for each additional percentage of votes that go to Biden). Thus, an equation can be created:
+
+_CasesPerMill_hat = 166463.402 - 1261.686 * PercentBiden_
+
+Again, *CasesPerMill_hat* is the fitted (expected) value for `CasesPerMill`. *PercentBiden* is the percentage of votes that went to Biden. 166463.402 is the intercept and -1261.686 is the slope.
+
+To put this in practice, imagine a state were 39 percent of the votes went to Biden:
+
+_CasesPerMill_hat = 166463.402 - 1261.686 * PercentBiden_
+                 _= 166463.402 - 1261.686 * 39_
+                 _= 166463.402 - 49205.754_
+                 _= 117257.648_
+
+This means that the expected amount of Covid-19 cases for a state where Biden got 39 percent of the votes is *117257.648*. For another example, imagine a state were 57 percent of the votes went to Biden:
+
+_CasesPerMill_hat = 166463.402 - 1261.686 * PercentBiden_
+                 _= 166463.402 - 1261.686 * 57_
+                 _= 166463.402 - 71916.102_
+                 _= 94547.3_
+
+This means that the expected amount of Covid-19 cases for a state where Biden got 57 percent of the votes is *94547.3*.
+
+The `intercept` itself is the amount of expected Covid-19 cases per 1 million people in a theoretical state were 0 percent of the votes went to Biden. For a last example, imagine the opposite, an unrealistic circumstance were 100 percent of a state's votes went to Biden:
+
+_CasesPerMill_hat = 166463.402 - 1261.686 * PercentBiden_
+                 _= 166463.402 - 1261.686 * 100_
+                 _= 166463.402 - 126168.6_
+                 _= 40295.802_
+
+This means that the expected amount of Covid-19 cases for a state where Biden got 100 percent of the votes is *40295.802*.
+
+If another similar model were to be created with `PercentTrump`, the two could be plotted together as shown below.
+
+```{r, echo = FALSE, message = FALSE}
+ggplot(tidy_covid_election, aes(y = CasesPerMill)) +
+  geom_smooth(aes(x = PercentBiden), method = "lm", se = FALSE, color = "blue") +
+  geom_smooth(aes(x = PercentTrump), method = "lm", se = FALSE, color = "red") +
+  labs(x = "Percent Of Voters Who Voted For Candidate (Blue = Biden, Red = Trump)",
+       y = "Total Covid Cases Per 1 Million People")
+```
+
+Here, it is easy to see the positive correlation between the percent of voters who voted for Trump and the total Covid-19 cases per 1 million people (in a state). Oppositely, the negative correlation between votes for Biden and Covid-19 cases can also be seen.
+
+Note that the above regressions were simple regressions. A complex regression (with an extra variable) in this case would include both `DoesBidenWin` and `PercentBiden` or `PercentTrump` and `PercentBiden`. In the first case, this would be counter productive because (small exceptions for third party votes) `DoesBidenWin` and `PercentBiden` are strongly correlated in the case that `PercentBiden` more or less predicts `DoesBidenWin`. In the second case, (again, small exceptions and changes for third party votes) `PercentTrump` and `PercentBiden` mostly mirror each other. For now, the two above simple regressions will do.
+
+
+## Conducting a Hypothesis Test
+
+With the exploratory data analysis and the regression modeling, evidence has been gathered that on average, states who had more people vote for Trump have more Covid-19 per 1 million people. A short falling to mention is that the election was one point in time, while Covid-19 started in 2019 and continues now into 2021. Two years is enough for one to change their political views, but in this very divided world, it doesn't happen often (and so quickly). If this study were about the Measles (that have existed for a long time), a variable of time would be very useful (without it it would be a counterproductive study). Although a time variable can be added in this Covid-19 Study, it wouldn't be too useful as Covid-19 has only existed for a few years.
+
+Onward, a hypothesis test can be conducted to find the probability that the results that were found, were found by pure chance. How this works is that a hypothetical scenario where whether or not Biden won the popular vote in a particular state does not affect the amount of Covid-19 cases, is created. This world is created 10,000 times, then the difference in the mean of `CasesPerMill` between values of `DoesBidenWin` is put into a data frame. Then, count how many of these hypothetical worlds are more extreme than the observed values. In other words, what percentage of these worlds have a difference between the difference in means and the center of the data larger than the actual (observed) data (for two-sided tests)?
+
+First, a null hypothesis and an alternative hypothesis are created. The null hypothesis is always 'there no correlation between...'; and the alternative hypothesis is 'there is a correlation between...' (two-sided), 'there is a positive correlation between...' (one-sided), or 'there is a negative correlation between...' (one sided). The problem statement at the beginning talks about: is there a 'relationship' (correlation), but not specifically if if there is a positive or negative correlation, the test is two-sided (it would be one-sided if it said Biden winning states had more Covid-19).
+
+The null hypothesis (*H0*): There is no correlation between the mean cases per million people for states that voted for Trump and the mean cases per million people for states that voted for Biden.
+The alternative hypothesis (*HA*): There is a correlation between the mean cases per million people for states that voted for Trump and the mean cases per million people for states that voted for Biden.
+
+*H0: mean cases per million for states that voted for Trump - mean cases per million for states that voted for Biden = 0*
+*HA: mean cases per million for states that voted for Trump - mean cases per million for states that voted for Biden =not 0*
+
+Below is the code for the 'theoretical scenario'. The code looks much like the code for a bootstrap sampling, were new data is created from old data to have a larger dataset. This is not used here because all the data is present. This is because a census (all the voting data from all voters in all states) was conducted. The total mean is known because the data contains the entire population (of voters), so any guessing with confidence intervals in counterproductive.
+
+```{r}
+#Making sure the random part is the same every time
+set.seed(2)
+
+#Creating the 'hypothetical world'
+null_distribution_covid_election <- tidy_covid_election %>% #New data frame name and source
+  specify(formula = CasesPerMill ~ DoesBidenWin) %>% #Specifying the formula
+  hypothesize(null = "independence") %>% #Setting the type of test to a hypothesis test
+  generate(reps = 100000, type = "permute") %>% #Generating the 10,000 'worlds'
+  calculate(stat = "diff in means", order = c(TRUE, FALSE)) #For each world, calculating the difference in means between values of `DoesBidenWin`
+
+#Displaying the first 10 row of this new data frame
+null_distribution_covid_election %>%
+  head(10)
+```
+
+`replicate` corresponds to each individual 'world'. `stat` is the difference in means of Covid-19 cases per one million people for states that voted for Biden, and states that voted for Trump (for each replicate).
+
+The next bit of code calculates the observed (or actual) difference in means of Covid-19 cases per one million people for states that voted for Biden, and states that voted for Trump:
+
+```{r}
+obs_diff_means_covid_election <- tidy_covid_election %>% #New data frame name and source
+  specify(formula = CasesPerMill ~ DoesBidenWin) %>% #Specifying formula
+  calculate(stat = "diff in means", order = c(TRUE, FALSE)) #Calculating the difference in means
+
+obs_diff_means_covid_election #Displaying the result
+```
+This stat is the same as the offset in the first regression model because they represent the same thing.
+
+The next chunk of code creates a histogram of all of the replicates' `stat` values. It then shades in light pink the instances that were more extreme than the observed difference in means. The red line signifies the observed difference in means.
+
+```{r}
+visualize(null_distribution_covid_election, bins = 10) + #Basic visualization code
+  shade_p_value(obs_stat = obs_diff_means_covid_election, direction = "both") + #Shading more extreme values
+  theme_light() + #Theme
+  labs(x = "Difference (between values of `DoesBidenWin`) in Means of `CasesPerMill`",
+       title = "Hypothesis Distribution and Observed Values")
+```
+
+What is that minuscule line of instances more extreme than the observed value? The percentage of cases that fall outside that range is called the p-value. The p-value is a very good way of telling if the results are statistically significant. They are if the p-value is less than alpha, the chances of getting a Type 1 error (rejecting the null hypothesis when the null hypothesis is actually true). Since rejecting the null hypothesis is a fairly large claim, the chosen value for alpha is a conservative value of 0.01. That means that there is a maximum of a 1% chance that the null hypothesis is rejected when it is in fact true. The last chunk of code calculates the p-value:
+
+```{r}
+p_value_covid_election <- null_distribution_covid_election %>% #New data frame name and source
+  get_p_value(obs_stat = obs_diff_means_covid_election, direction = "both") #Getting the p-value
+
+p_value_covid_election #Displaying the result
+```
+
+The p-value is 0.0003, which is under the alpha value of 0.01, so it is safe to reject the null hypothesis in favor of the alternative hypothesis.
+
+
+## Conclusion
+
+It can be learned from the data that (according to the performed tests), political leaning does have an effect of the amount of Covid-19 cases (accounting for population). States where Biden wins the popular vote on average have less Covid-19 cases per million people. Similarly, the larger the percentage of people in a state that vote for Biden, on average, the less Covid-19 cases that state has. Oppositely, the larger the percentage of people in a state that vote for Trump, on average, the more Covid-19 cases that state has.
